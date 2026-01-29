@@ -9,7 +9,7 @@
 .Rhistory
 .RData
 
-# Logs (optional)
+# Logs
 *.log
 
 # Raw data (ignore contents, keep folder)
@@ -19,8 +19,8 @@ data_raw/*
 # Processed data (ignore contents, keep folder)
 data_processed/*
 !data_processed/.gitkeep
+!data_processed/comext_hs72_hs76_shares_2019.csv
 
-# Outputs (ignore contents, keep folder)
+# Outputs
 output/*
 !output/.gitkeep
-
