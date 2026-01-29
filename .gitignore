@@ -1,6 +1,26 @@
+# macOS
+.DS_Store
+
+# MATLAB
 *.asv
 *.mat
+
+# R
+.Rhistory
+.RData
+
+# Logs (optional)
 *.log
-*.txt
-.DS_Store
+
+# Raw data (ignore contents, keep folder)
+data_raw/*
+!data_raw/.gitkeep
+
+# Processed data (ignore contents, keep folder)
+data_processed/*
+!data_processed/.gitkeep
+
+# Outputs (ignore contents, keep folder)
+output/*
+!output/.gitkeep
 
