@@ -1,8 +1,11 @@
 clear; clc;
 
+% Load metals split parameters (created from OECD + COMEXT)
+metals = readtable('data_processed/metals_split_params_2014.csv');
+
 % ---- Dimensions
 N = 2;              % 1 = EU, 2 = non-EU
-S = 2;              % 1 = steel, 2 = aluminum
+S = 3;              % 1 = steel, 2 = aluminum
 mu = 1;
 
 % ---- Baseline incomes (levels don't matter for PoC)
@@ -24,23 +27,38 @@ Lijs3D(:,2,1) = [0.40; 0.60];
 Lijs3D(:,1,2) = [0.60; 0.40];
 Lijs3D(:,2,2) = [0.35; 0.65];
 
-% ---- Sector expenditure weights beta_{j,s} (replicated across i)
+% Other non-ferrous (s=3): start with same trade pattern as aluminum (placeholder)
+Lijs3D(:,1,3) = [0.60; 0.40];   % EU buys 60% from EU, 40% from non-EU
+Lijs3D(:,2,3) = [0.35; 0.65];   % non-EU buys 35% from EU, 65% domestic
+
+% Pull EU composition from metals_split_params_2014.csv
+% (Choose DEU as a proxy for "EU" in the 2-country POC)
+eu_row = strcmp(metals.country, 'DEU');
+
+betaEU = [ ...
+    metals.share_steel_in_c24(eu_row), ...
+    metals.share_al_in_c24(eu_row), ...
+    metals.share_other_nf_in_c24(eu_row) ...
+];
+
+% For non-EU in the POC, start simple: same composition as EU (can change later)
+betaNEU = betaEU;
+
 betajs3D = zeros(N,N,S);
-betaEU  = [0.5, 0.5];
-betaNEU = [0.5, 0.5];
 
 for j = 1:N
     if j==1
-        betajs3D(:,j,1) = betaEU(1);
-        betajs3D(:,j,2) = betaEU(2);
+        betajs3D(:,j,1) = betaEU(1);  % steel
+        betajs3D(:,j,2) = betaEU(2);  % aluminum
+        betajs3D(:,j,3) = betaEU(3);  % other non-ferrous
     else
         betajs3D(:,j,1) = betaNEU(1);
         betajs3D(:,j,2) = betaNEU(2);
+        betajs3D(:,j,3) = betaNEU(3);
     end
 end
-
 % ---- Elasticities: sigma = epsilon + 1
-epsilon = [5, 5];
+epsilon = [5, 5, 5];
 sigma   = epsilon + 1;
 sigma_s3D = zeros(N,N,S);
 for s = 1:S
@@ -90,7 +108,7 @@ for j = 1:N
     end
 end
 
-disp('EU sector price hats (Steel, Aluminum):');
+disp('EU sector price hats [steel, aluminum, otherNF]:');
 disp(P_hat(1,:));
 
 % =========================
@@ -129,7 +147,7 @@ for g = 1:length(grid)
     end
 
     % loss vs targets
-    loss(g) = sum((P_EU(g,:) - target).^2);
+    loss(g) = sum((P_EU(g,1:2) - target).^2);
 end
 
 [~, idx] = min(loss);
@@ -138,7 +156,7 @@ best_tau = grid(idx);
 disp('--- Calibration result ---')
 disp(['Best cbam_tau: ', num2str(best_tau)])
 disp('Matched EU price hats [steel, aluminum]:')
-disp(P_EU(idx,:))
+disp(P_EU(idx,1:2))
 disp('Targets [steel, aluminum]:')
 disp(target)
 
@@ -148,12 +166,8 @@ disp(target)
 
 target = [1.0084, 1.0458];   % Colmer targets: [steel, aluminum]
 
-obj2 = @(tau) ...
-    sum( ...
-        ( compute_prices(tau(1), tau(2), ...
-            N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D, ...
-            sigma_s3D,tijs3D,tauijs_h3D,Lijs3D) ...
-        - target ).^2 );
+obj2 = @(tau) obj_prices_only12(tau, target, ...
+    N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D,sigma_s3D,tijs3D,tauijs_h3D,Lijs3D);
 
 % initial guess: start near previous result
 tau0 = [0.03; 0.10];   % [steel, aluminum]
@@ -178,3 +192,13 @@ results.Lijs3D = Lijs3D;
 results.sigma = sigma;
 
 save('cbam_poc_results.mat','results');
+
+function val = obj_prices_only12(tau, target, ...
+    N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D,sigma_s3D,tijs3D,tauijs_h3D,Lijs3D)
+
+    p = compute_prices(tau(1), tau(2), ...
+        N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D, ...
+        sigma_s3D,tijs3D,tauijs_h3D,Lijs3D);
+
+    val = sum((p(1:2) - target).^2);
+end
