@@ -20,6 +20,8 @@ data_raw/*
 data_processed/*
 !data_processed/.gitkeep
 !data_processed/comext_hs72_hs76_shares_2019.csv
+!data_processed/oecd_c24A_c24B_output_shares_2014.csv
+!data_processed/metals_split_params_2014.csv
 
 # Outputs
 output/*
