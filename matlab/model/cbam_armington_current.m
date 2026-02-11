@@ -1,11 +1,50 @@
 clear; clc;
 
-% Load metals split parameters (created from OECD + COMEXT)
-metals = readtable('data_processed/metals_split_params_2014.csv');
+% ============================================================
+% cbam_armington_current.m
+% "Current" (scalable) version of the PoC:
+% - S=3 sectors: steel, aluminum, other non-ferrous
+% - Metals split loaded from data_processed/metals_split_params_2014.csv
+% - CBAM wedges only applied to steel & aluminum
+% - Calibration targets only steel & aluminum (Colmer)
+% ============================================================
+
+% ---- Robust paths (works regardless of MATLAB current folder)
+thisDir = fileparts(mfilename('fullpath'));         % .../matlab/model
+repoDir = fileparts(fileparts(thisDir));            % repo root
+coreDir = fullfile(repoDir, 'matlab', 'core');
+dataProcessedDir = fullfile(repoDir, 'data_processed');
+outputDir        = fullfile(repoDir, 'output');
+
+if ~exist(outputDir, 'dir')
+    mkdir(outputDir);
+end
+
+% Ensure we can find script-local and shared core functions
+addpath(thisDir);
+addpath(coreDir);
+rehash;
+
+% ---- Load metals split parameters (OECD C24A/C24B + COMEXT aluminum share)
+metalsFile = fullfile(dataProcessedDir, 'metals_split_params_2014.csv');
+metals = readtable(metalsFile);
+
+% Load WIOD-based C24 import shares (EU vs non-EU)
+wiod_shares = readtable('data_processed/wiod_c24_import_shares_2014.csv');
+
+% Extract WIOD C24 import shares
+lambda_EU_EU    = wiod_shares.share(strcmp(wiod_shares.importer_group,'EU')    & strcmp(wiod_shares.exporter_group,'EU'));
+lambda_EU_nonEU = wiod_shares.share(strcmp(wiod_shares.importer_group,'EU')    & strcmp(wiod_shares.exporter_group,'nonEU'));
+
+lambda_nonEU_EU    = wiod_shares.share(strcmp(wiod_shares.importer_group,'nonEU') & strcmp(wiod_shares.exporter_group,'EU'));
+lambda_nonEU_nonEU = wiod_shares.share(strcmp(wiod_shares.importer_group,'nonEU') & strcmp(wiod_shares.exporter_group,'nonEU'));
+
+disp('WIOD import shares (C24):');
+disp([lambda_EU_EU, lambda_EU_nonEU; lambda_nonEU_EU, lambda_nonEU_nonEU]);
 
 % ---- Dimensions
-N = 2;              % 1 = EU, 2 = non-EU
-S = 3;              % 1 = steel, 2 = aluminum
+N = 2;   % 1 = EU, 2 = non-EU
+S = 3;   % 1 = steel, 2 = aluminum, 3 = other non-ferrous
 mu = 1;
 
 % ---- Baseline incomes (levels don't matter for PoC)
@@ -16,50 +55,69 @@ Yi3D = repmat(reshape(Yi,[N 1 1]), [1 N S]);   % size N x N x S
 Dj3D   = zeros(N,N,S);
 Dj_h3D = zeros(N,N,S);
 
-% ---- Baseline import shares lambda_{i,j,s} (sum over i = 1 for each j,s)
-Lijs3D = zeros(N,N,S);
+% ---- Sector expenditure weights beta_{j,s} (replicated across i)
+betajs3D = zeros(N,N,S);
 
-% Steel (s=1): EU buys 70% from EU, 30% from non-EU; non-EU buys 60% domestic
-Lijs3D(:,1,1) = [0.70; 0.30];
-Lijs3D(:,2,1) = [0.40; 0.60];
+% Map "EU" and "non-EU" to proxy countries in metals table
+eu_proxy  = 'DEU';
+neu_proxy = 'TUR';
 
-% Aluminum (s=2): EU buys 60% from EU, 40% from non-EU; non-EU buys 65% domestic
-Lijs3D(:,1,2) = [0.60; 0.40];
-Lijs3D(:,2,2) = [0.35; 0.65];
+eu_row  = strcmp(metals.country, eu_proxy);
+neu_row = strcmp(metals.country, neu_proxy);
 
-% Other non-ferrous (s=3): start with same trade pattern as aluminum (placeholder)
-Lijs3D(:,1,3) = [0.60; 0.40];   % EU buys 60% from EU, 40% from non-EU
-Lijs3D(:,2,3) = [0.35; 0.65];   % non-EU buys 35% from EU, 65% domestic
+if ~any(eu_row)
+    error("EU proxy '%s' not found in metals table.", eu_proxy);
+end
+if ~any(neu_row)
+    error("Non-EU proxy '%s' not found in metals table.", neu_proxy);
+end
 
-% Pull EU composition from metals_split_params_2014.csv
-% (Choose DEU as a proxy for "EU" in the 2-country POC)
-eu_row = strcmp(metals.country, 'DEU');
-
-betaEU = [ ...
+betaEU  = [ ...
     metals.share_steel_in_c24(eu_row), ...
     metals.share_al_in_c24(eu_row), ...
     metals.share_other_nf_in_c24(eu_row) ...
 ];
 
-% For non-EU in the POC, start simple: same composition as EU (can change later)
-betaNEU = betaEU;
-
-betajs3D = zeros(N,N,S);
+betaNEU = [ ...
+    metals.share_steel_in_c24(neu_row), ...
+    metals.share_al_in_c24(neu_row), ...
+    metals.share_other_nf_in_c24(neu_row) ...
+];
 
 for j = 1:N
-    if j==1
-        betajs3D(:,j,1) = betaEU(1);  % steel
-        betajs3D(:,j,2) = betaEU(2);  % aluminum
-        betajs3D(:,j,3) = betaEU(3);  % other non-ferrous
+    if j == 1
+        betajs3D(:,j,1) = betaEU(1);
+        betajs3D(:,j,2) = betaEU(2);
+        betajs3D(:,j,3) = betaEU(3);
     else
         betajs3D(:,j,1) = betaNEU(1);
         betajs3D(:,j,2) = betaNEU(2);
         betajs3D(:,j,3) = betaNEU(3);
     end
 end
+
+disp('betaEU [steel, aluminum, otherNF]:');  disp(betaEU);
+disp('betaNEU [steel, aluminum, otherNF]:'); disp(betaNEU);
+
+% ---- Baseline import shares lambda_{i,j,s} from WIOD (C24), applied to all metals sub-sectors
+Lijs3D = zeros(N,N,S);
+
+for s = 1:S
+    % Importer j = 1 (EU)
+    Lijs3D(:,1,s) = [lambda_EU_EU; lambda_EU_nonEU];
+
+    % Importer j = 2 (non-EU)
+    Lijs3D(:,2,s) = [lambda_nonEU_EU; lambda_nonEU_nonEU];
+end
+
+% sanity check: should be 1 for each (j,s)
+disp('Check sum_i lambda(i,j,s):');
+disp(squeeze(sum(Lijs3D,1)));
+
 % ---- Elasticities: sigma = epsilon + 1
 epsilon = [5, 5, 5];
 sigma   = epsilon + 1;
+
 sigma_s3D = zeros(N,N,S);
 for s = 1:S
     sigma_s3D(:,:,s) = sigma(s);
@@ -76,6 +134,7 @@ disp('Step 3 complete: baseline objects created.');
 cbam_tau = 0.10;                  % 10% test
 tijs_p3D(2,1,1) = cbam_tau;       % steel
 tijs_p3D(2,1,2) = cbam_tau;       % aluminum
+% (s=3 otherNF gets no CBAM wedge)
 
 % ---- Solve for wage hats with fsolve
 X0 = ones(N,1);
@@ -84,7 +143,7 @@ syst = @(X) DEK_TRF_SYSTEM_N1(X, N, S, mu, Yi3D, Dj3D, Dj_h3D, ...
                               betajs3D, sigma_s3D, tijs3D, tijs_p3D, ...
                               tauijs_h3D, Lijs3D);
 
-opts = optimset('Display','iter','MaxIter',2000,'TolFun',1e-12,'TolX',1e-12);
+opts = optimset('Display','off','MaxIter',2000,'TolFun',1e-12,'TolX',1e-12);
 
 [wi_h, fval] = fsolve(syst, X0, opts);
 
@@ -92,8 +151,6 @@ disp('max residual:'); disp(max(abs(fval)));
 disp('wage hats (EU, non-EU):'); disp(wi_h);
 
 % ---- Compute sector price index hats for each importer j and sector s
-% P_hat(j,s) = [ sum_i lambda(i,j,s) * (phi(i,j,s)*w_i_hat)^(1-sigma_s) ]^(1/(1-sigma_s))
-
 phi = tauijs_h3D .* (1+tijs_p3D) ./ (1+tijs3D);  % delivered wedge hat
 
 P_hat = zeros(N,S);
@@ -112,9 +169,9 @@ disp('EU sector price hats [steel, aluminum, otherNF]:');
 disp(P_hat(1,:));
 
 % =========================
-% Step 6: Calibrate cbam_tau by matching Colmer targets
+% Step 6: Calibrate single cbam_tau by matching Colmer targets
 % =========================
-target = [1.0084, 1.0458];      % [steel, aluminum] hats (edit if needed)
+target = [1.0084, 1.0458];      % [steel, aluminum] hats (Colmer)
 grid = 0.00:0.01:0.30;
 
 P_EU = nan(length(grid), S);
@@ -128,12 +185,12 @@ for g = 1:length(grid)
     tijs_p3D(2,1,1) = cbam_tau;   % steel
     tijs_p3D(2,1,2) = cbam_tau;   % aluminum
 
-    % solve wages (same method you used before)
+    % solve wages (minimize squared residuals)
     obj = @(X) sum( DEK_TRF_SYSTEM_N1(X, N, S, mu, Yi3D, Dj3D, Dj_h3D, ...
                                       betajs3D, sigma_s3D, tijs3D, tijs_p3D, ...
                                       tauijs_h3D, Lijs3D ).^2 );
 
-    [wi_h_tmp, fval_tmp] = fminsearch(obj, ones(N,1), optimset('Display','off','TolX',1e-10,'TolFun',1e-12));
+    wi_h_tmp = fminsearch(obj, ones(N,1), optimset('Display','off','TolX',1e-10,'TolFun',1e-12));
 
     % compute EU sector price hats
     phi = tauijs_h3D .* (1+tijs_p3D) ./ (1+tijs3D);
@@ -146,7 +203,7 @@ for g = 1:length(grid)
         P_EU(g,s) = tmp^(1/(1 - sig));
     end
 
-    % loss vs targets
+    % loss vs targets (match ONLY steel+aluminum)
     loss(g) = sum((P_EU(g,1:2) - target).^2);
 end
 
@@ -161,15 +218,14 @@ disp('Targets [steel, aluminum]:')
 disp(target)
 
 % =========================
-% Step 7: Sector-specific CBAM wedges
+% Step 7: Sector-specific CBAM wedges (steel and aluminum separately)
 % =========================
-
 target = [1.0084, 1.0458];   % Colmer targets: [steel, aluminum]
 
 obj2 = @(tau) obj_prices_only12(tau, target, ...
     N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D,sigma_s3D,tijs3D,tauijs_h3D,Lijs3D);
 
-% initial guess: start near previous result
+% initial guess: start near plausible values
 tau0 = [0.03; 0.10];   % [steel, aluminum]
 
 [tau_hat, loss_val] = fminsearch(obj2, tau0, ...
@@ -190,9 +246,17 @@ results.N = N; results.S = S;
 results.Yi = Yi;
 results.Lijs3D = Lijs3D;
 results.sigma = sigma;
+results.betaEU  = betaEU;
+results.betaNEU = betaNEU;
+results.eu_proxy  = eu_proxy;
+results.neu_proxy = neu_proxy;
 
-save('cbam_poc_results.mat','results');
+save(fullfile(outputDir,'cbam_current_results.mat'),'results');
 
+
+% =========================
+% Local helper function(s)
+% =========================
 function val = obj_prices_only12(tau, target, ...
     N,S,mu,Yi3D,Dj3D,Dj_h3D,betajs3D,sigma_s3D,tijs3D,tauijs_h3D,Lijs3D)
 

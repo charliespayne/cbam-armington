@@ -20,16 +20,23 @@ use those wedges as inputs into a macro trade model.
 4. Calibrate sector-specific wedges so model-implied price changes
    match Colmer et al. upstream estimates.
 
-## Files
-- `poc_2country_cbam.m`  
-  Main script: defines the economy, applies CBAM wedges, solves the model,
-  and performs calibration.
+## MATLAB Structure
+- `matlab/model/cbam_armington_current.m`  
+  Main model script for the current calibrated setup.
 
-- `DEK_TRF_SYSTEM_N1.m`  
+- `matlab/core/DEK_TRF_SYSTEM_N1.m`  
   Equilibrium system implementing the exact-hat Armington structure.
 
-- `compute_prices.m`  
+- `matlab/core/compute_prices.m`  
   Helper function used for sector-specific CBAM calibration.
+
+- `matlab/experiments/mc_wedge_calibration/poc_mc_wedge_calib.m`  
+  Experiment script for marginal-cost wedge calibration.
+
+## Data Construction
+- `R/build_comext_aluminum_split_2014.R`  
+  Consolidated COMEXT 2014 builder for aluminum share within non-ferrous
+  metals. Writes `data_processed/comext_al_share_within_nonferrous_2014_sitc.csv`.
 
 ## Notes
 This is a toy proof of concept intended to validate the modeling strategy
